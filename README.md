@@ -2,8 +2,8 @@
 
 > Record, replay and **break** LLM API calls in your tests.
 
-> **Status: 0.x, early preview.** Record/replay of non-streaming calls works today.
-> Streaming replay and fault injection (`429`, `529`, timeouts, cut streams) are coming in 0.3.
+> **Status: 0.x, early preview.** Record/replay (JSON and SSE streaming) and fault injection work today.
+> Vitest/Jest integration and the maintenance CLI are coming next.
 
 Works with any SDK that accepts a `fetch` option (OpenAI, Anthropic, Mistral, Gemini, Vercel AI SDK…).
 Zero runtime dependencies. Node.js ≥ 22.
@@ -28,6 +28,46 @@ const client = new Anthropic({
 
 The first run calls the API and writes `tests/__cassettes__/summarize-article.json`.
 Later runs replay it, with no network and no API key.
+
+## Break it: fault injection
+
+Replay a real conversation, but make the API fail exactly when you want. Faults never touch the network.
+
+```ts
+import { cassetteFetch } from "@stackapi/llm-crashtest";
+
+test("falls back to the backup model when overloaded", async () => {
+  const client = new Anthropic({
+    apiKey: "replay",
+    maxRetries: 0,
+    fetch: cassetteFetch({
+      dir: "tests/__cassettes__",
+      name: "summarize-fallback",
+      faults: [{ on: 1, type: "http", status: 529 }],
+    }),
+  });
+  const r = await summarize(client, article);
+  expect(r.model).toBe("claude-fallback");
+});
+```
+
+| Fault        | Options                                   | Effect                                                                                   |
+| ------------ | ----------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `http`       | `status`, `retryAfter?`, `shouldRetry?`, `body?` | Error response with the provider's real error body, so the SDK throws the same error class as in production (`RateLimitError`, `overloaded_error`…). |
+| `timeout`    | `afterMs?`                                | Rejects with an `AbortError`; SDKs report a connection timeout.                          |
+| `stream-cut` | `afterChunks`                             | Sends N chunks, then the connection drops mid-stream.                                    |
+| `malformed`  | `chunk?`                                  | Corrupts one SSE event's JSON (or truncates a JSON body).                                |
+| `latency`    | `ms`                                      | Adds a delay before the response.                                                        |
+
+`on` targets the N-th intercepted call (`on: 2`) or a filter (`on: { model: "claude-main" }`); without it, every call fails.
+`http` and `timeout` don't consume the recorded interaction, so the SDK's retry gets the recorded answer.
+Change faults mid-test with `f.setFaults([...])` (also resets `f.calls`).
+
+## Streaming
+
+SSE responses are recorded chunk by chunk as raw text, with their relative timing, so the SDK's parser receives
+exactly the same bytes on replay. Replay is instant by default; pass `replayTiming: "original"` to reproduce
+the recorded pacing (useful for streaming UIs).
 
 ## Modes
 
@@ -56,6 +96,8 @@ Tip: set `maxRetries: 0` on your SDK client in tests so a miss fails immediately
 | `redact.patterns`       | Extra `RegExp`s masked as `[REDACTED]` before writing.                                             |
 | `redact.headers`        | Extra request headers whose values are secrets to mask everywhere.                                 |
 | `redact.keepResponseHeaders` | Extra response headers to keep (allowlist).                                                   |
+| `faults`                | Faults to inject, see above.                                                                       |
+| `replayTiming`          | `instant` (default) or `original`.                                                                 |
 | `maxBodyBytes`          | Max request/response body size. Default 10 MiB.                                                    |
 | `recordTransientErrors` | Also record `429` and `5xx` responses. Default `false`.                                            |
 | `fetch`                 | Underlying `fetch` for real calls. Default `globalThis.fetch`.                                     |

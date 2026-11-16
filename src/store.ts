@@ -19,14 +19,22 @@ export interface RecordedResponse {
   status: number;
   statusText?: string;
   headers: Record<string, string>;
-  bodyEncoding: "json" | "text";
+  /** `stream` : le corps est dans `Interaction.stream`, chunk par chunk (texte SSE brut). */
+  bodyEncoding: "json" | "text" | "stream";
   body: JsonValue;
+}
+
+export interface StreamChunk {
+  /** Délai en ms depuis le début de la réponse. */
+  t: number;
+  data: string;
 }
 
 export interface Interaction {
   key: string;
   request: RecordedRequest;
   response: RecordedResponse;
+  stream?: StreamChunk[];
   recordedAt: string;
 }
 
@@ -112,10 +120,26 @@ export function validateCassette(data: unknown, file: string): Cassette {
       (res["status"] as number) < 200 ||
       (res["status"] as number) > 599 ||
       !isStringRecord(res["headers"]) ||
-      (res["bodyEncoding"] !== "json" && res["bodyEncoding"] !== "text") ||
+      !["json", "text", "stream"].includes(res["bodyEncoding"] as string) ||
       (res["bodyEncoding"] === "text" && typeof res["body"] !== "string")
     ) {
       fail(file, `${at}.response invalide`);
+    }
+    const stream = it["stream"];
+    if (res["bodyEncoding"] === "stream") {
+      const ok =
+        Array.isArray(stream) &&
+        stream.every(
+          (c: unknown) =>
+            isPlainObject(c) &&
+            typeof c["data"] === "string" &&
+            typeof c["t"] === "number" &&
+            Number.isFinite(c["t"]) &&
+            c["t"] >= 0,
+        );
+      if (!ok) fail(file, `${at}.stream invalide`);
+    } else if (stream !== undefined) {
+      fail(file, `${at}.stream inattendu (bodyEncoding n'est pas "stream")`);
     }
     if (typeof it["recordedAt"] !== "string") fail(file, `${at}.recordedAt invalide`);
   });

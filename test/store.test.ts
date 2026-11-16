@@ -38,6 +38,21 @@ describe("lecture des cassettes", () => {
     ["JSON illisible", "{"],
     ["version inconnue", JSON.stringify({ version: 99, interactions: [] })],
     ["interaction invalide", JSON.stringify({ version: 1, interactions: [{ key: "x" }] })],
+    [
+      "flux sans chunks",
+      JSON.stringify({
+        version: 1,
+        interactions: [
+          {
+            key: `sha256:${"0".repeat(64)}`,
+            request: { method: "POST", url: "https://h/x", body: null },
+            response: { status: 200, headers: {}, bodyEncoding: "stream", body: null },
+            stream: [{ t: -1, data: 42 }],
+            recordedAt: "2026-11-15T00:00:00Z",
+          },
+        ],
+      }),
+    ],
   ])("rejette : %s", async (_label, content) => {
     const file = path.join(await tempDir(), "bad.json");
     await writeFile(file, content);

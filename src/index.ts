@@ -5,6 +5,15 @@ export {
   CassetteMissError,
   SecretDetectedError,
 } from "./errors.js";
+export type {
+  Fault,
+  FaultTarget,
+  HttpFault,
+  LatencyFault,
+  MalformedFault,
+  StreamCutFault,
+  TimeoutFault,
+} from "./faults.js";
 export {
   type CassetteFetch,
   type CassetteOptions,
@@ -22,4 +31,6 @@ export {
   type Interaction,
   type RecordedRequest,
   type RecordedResponse,
+  type StreamChunk,
 } from "./store.js";
+export type { ReplayTiming } from "./stream.js";
