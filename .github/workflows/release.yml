@@ -1,6 +1,7 @@
 name: Release
 
-# Publie sur npm quand un tag vX.Y.Z est poussé.
+# Stage la version sur npm quand un tag vX.Y.Z est poussé ; la publication finale
+# demande votre approbation 2FA (`npm stage approve`).
 # Authentification par trusted publishing OIDC : aucun jeton npm stocké (OWASP A04),
 # provenance signée automatiquement (OWASP A08).
 on:
@@ -45,11 +46,13 @@ jobs:
       - run: npm run check:package
       - run: npm audit --omit=dev --audit-level=moderate
 
-      - name: Publier (tag next pour les préversions et les 0.x)
+      # Staged publishing : la CI dépose la version, sans pouvoir la rendre publique.
+      # Vous l'approuvez ensuite avec votre 2FA : `npm stage list` puis `npm stage approve <id>`.
+      - name: Stager la version (tag next pour les préversions et les 0.x)
         run: |
           VERSION=$(node -p "require('./package.json').version")
           case "$VERSION" in
             0.*|*-*) TAG=next ;;
             *) TAG=latest ;;
           esac
-          npm publish --access public --provenance --tag "$TAG"
+          npm stage publish --access public --provenance --tag "$TAG"
