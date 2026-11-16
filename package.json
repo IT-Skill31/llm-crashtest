@@ -1,0 +1,78 @@
+{
+  "name": "@stackapi/llm-crashtest",
+  "version": "0.0.0",
+  "description": "Record, replay and break LLM API calls in tests",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "check:package": "publint && attw --pack . --profile node16",
+    "prepublishOnly": "npm run build && npm test && npm run check:package"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "1.8.0",
+    "@arethetypeswrong/cli": "0.18.5",
+    "@biomejs/biome": "2.6.8",
+    "@types/node": "26.6.6",
+    "openai": "7.57.0",
+    "publint": "0.3.25",
+    "tsup": "9.0.0",
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
+  },
+  "keywords": [
+    "llm",
+    "testing",
+    "vcr",
+    "cassette",
+    "record",
+    "replay",
+    "mock",
+    "fault-injection",
+    "openai",
+    "anthropic",
+    "gemini",
+    "vitest"
+  ],
+  "license": "MIT",
+  "author": "Adda",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IT-Skill31/llm-crashtest.git"
+  },
+  "homepage": "https://github.com/IT-Skill31/llm-crashtest#readme",
+  "bugs": {
+    "url": "https://github.com/IT-Skill31/llm-crashtest/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
