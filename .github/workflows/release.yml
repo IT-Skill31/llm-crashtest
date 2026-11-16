@@ -1,0 +1,55 @@
+name: Release
+
+# Publie sur npm quand un tag vX.Y.Z est poussé.
+# Authentification par trusted publishing OIDC : aucun jeton npm stocké (OWASP A04),
+# provenance signée automatiquement (OWASP A08).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Environnement protégé : ajoutez-y une règle d'approbation dans Settings > Environments.
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Pas de registry-url ni de NODE_AUTH_TOKEN : ils prendraient le pas sur l'OIDC.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: npm install -g npm@12.2.2 --ignore-scripts
+
+      - name: Le tag correspond à la version du package
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME ≠ version v$VERSION du package.json" >&2
+            exit 1
+          fi
+
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - run: npm run check:package
+      - run: npm audit --omit=dev --audit-level=moderate
+
+      - name: Publier (tag next pour les préversions et les 0.x)
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          case "$VERSION" in
+            0.*|*-*) TAG=next ;;
+            *) TAG=latest ;;
+          esac
+          npm publish --access public --provenance --tag "$TAG"
