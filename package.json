@@ -1,6 +1,6 @@
 {
   "name": "@stackapi/llm-crashtest",
-  "version": "0.0.0",
+  "version": "0.3.0",
   "description": "Record, replay and break LLM API calls in tests",
   "type": "module",
   "exports": {
