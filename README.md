@@ -11,14 +11,14 @@ Zero runtime dependencies. Node.js ≥ 22.
 ## Install
 
 ```sh
-npm i -D @stackapi/llm-crashtest
+npm i -D @appystore/llm-crashtest
 ```
 
 ## Usage
 
 ```ts
 import Anthropic from "@anthropic-ai/sdk";
-import { cassetteFetch } from "@stackapi/llm-crashtest";
+import { cassetteFetch } from "@appystore/llm-crashtest";
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY ?? "replay",
@@ -34,7 +34,7 @@ Later runs replay it, with no network and no API key.
 Replay a real conversation, but make the API fail exactly when you want. Faults never touch the network.
 
 ```ts
-import { cassetteFetch } from "@stackapi/llm-crashtest";
+import { cassetteFetch } from "@appystore/llm-crashtest";
 
 test("falls back to the backup model when overloaded", async () => {
   const client = new Anthropic({

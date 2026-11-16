@@ -1,5 +1,5 @@
 {
-  "name": "@stackapi/llm-crashtest",
+  "name": "@appystore/llm-crashtest",
   "version": "0.3.0",
   "description": "Record, replay and break LLM API calls in tests",
   "type": "module",
