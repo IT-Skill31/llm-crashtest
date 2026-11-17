@@ -52,7 +52,7 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           case "$VERSION" in
-            0.*|*-*) TAG=next ;;
+            *-*) TAG=next ;;
             *) TAG=latest ;;
           esac
           npm stage publish --access public --provenance --tag "$TAG"
