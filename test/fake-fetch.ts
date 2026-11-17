@@ -66,12 +66,101 @@ function openaiEvents(model: string, words: string[], extra: string): string[] {
   ];
 }
 
+const json = (data: unknown, hits: number) =>
+  new Response(JSON.stringify(data), {
+    headers: { "content-type": "application/json", "request-id": `req_${hits}` },
+  });
+
+function streamOf(events: string[], contentType: string, delayMs?: number): Response {
+  const encoder = new TextEncoder();
+  let i = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const ev = events[i++];
+      if (ev === undefined) return controller.close();
+      if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
+      controller.enqueue(encoder.encode(ev));
+    },
+  });
+  return new Response(stream, { headers: { "content-type": contentType } });
+}
+
+/** Gemini (generateContent / streamGenerateContent?alt=sse), Cohere v2 et Ollama. */
+function otherProviders(url: URL, body: Record<string, unknown>, hits: number): Response | null {
+  const gemini = /\/models\/([^/:]+):(stream)?[gG]enerateContent$/.exec(url.pathname);
+  if (gemini) {
+    const model = gemini[1];
+    const candidate = (text: string, done: boolean) => ({
+      candidates: [
+        {
+          content: { role: "model", parts: [{ text }] },
+          ...(done ? { finishReason: "STOP" } : {}),
+          index: 0,
+        },
+      ],
+      usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 3, totalTokenCount: 8 },
+      modelVersion: model,
+    });
+    if (gemini[2]) {
+      const events = WORDS.map(
+        (w, i) => `data: ${JSON.stringify(candidate(w, i === WORDS.length - 1))}\r\n\r\n`,
+      );
+      return streamOf(events, "text/event-stream");
+    }
+    return json(candidate(`réponse de ${model}`, true), hits);
+  }
+  if (url.pathname === "/v2/chat") {
+    return json(
+      {
+        id: `cohere-${hits}`,
+        finish_reason: "COMPLETE",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: `réponse de ${body["model"]}` }],
+        },
+        usage: {
+          billed_units: { input_tokens: 5, output_tokens: 3 },
+          tokens: { input_tokens: 5, output_tokens: 3 },
+        },
+      },
+      hits,
+    );
+  }
+  if (url.pathname === "/api/chat") {
+    const base = { model: body["model"], created_at: "2026-11-17T10:00:00Z" };
+    if (body["stream"] !== false) {
+      const lines = [
+        ...WORDS.map(
+          (w) =>
+            `${JSON.stringify({ ...base, message: { role: "assistant", content: w }, done: false })}\n`,
+        ),
+        `${JSON.stringify({ ...base, message: { role: "assistant", content: "" }, done: true, done_reason: "stop", eval_count: 4 })}\n`,
+      ];
+      return streamOf(lines, "application/x-ndjson");
+    }
+    return json(
+      {
+        ...base,
+        message: { role: "assistant", content: `réponse de ${body["model"]}` },
+        done: true,
+        done_reason: "stop",
+        eval_count: 3,
+      },
+      hits,
+    );
+  }
+  return null;
+}
+
 export function fakeLLMFetch(opts: { delayMs?: number; extraText?: string } = {}): FakeFetch {
   const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
     f.hits++;
     const req = new Request(input, init);
     const body = JSON.parse(await req.text()) as { model: string; stream?: boolean };
-    const anthropic = new URL(req.url).pathname.endsWith("/v1/messages");
+    const url = new URL(req.url);
+    const other = otherProviders(url, body as unknown as Record<string, unknown>, f.hits);
+    if (other) return other;
+    const anthropic = url.pathname.endsWith("/v1/messages");
     const extra = opts.extraText ?? "";
 
     if (!body.stream) {

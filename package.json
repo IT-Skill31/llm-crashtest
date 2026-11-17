@@ -14,33 +14,86 @@
         "default": "./dist/index.cjs"
       }
     },
+    "./vitest": {
+      "import": {
+        "types": "./dist/vitest.d.ts",
+        "default": "./dist/vitest.js"
+      },
+      "require": {
+        "types": "./dist/vitest.d.cts",
+        "default": "./dist/vitest.cjs"
+      }
+    },
+    "./vitest-setup": {
+      "import": {
+        "types": "./dist/vitest-setup.d.ts",
+        "default": "./dist/vitest-setup.js"
+      },
+      "require": {
+        "types": "./dist/vitest-setup.d.cts",
+        "default": "./dist/vitest-setup.cjs"
+      }
+    },
+    "./jest": {
+      "import": {
+        "types": "./dist/jest.d.ts",
+        "default": "./dist/jest.js"
+      },
+      "require": {
+        "types": "./dist/jest.d.cts",
+        "default": "./dist/jest.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "llm-crashtest": "./dist/cli.js"
+  },
   "files": [
     "dist"
   ],
   "engines": {
     "node": ">=22"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/vitest-setup.js",
+    "./dist/vitest-setup.cjs",
+    "./dist/cli.js"
+  ],
+  "peerDependencies": {
+    "vitest": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "node test/e2e/run.mjs",
+    "examples": "vitest run --config examples/vitest.config.ts",
     "lint": "biome check .",
     "format": "biome format --write .",
     "check:package": "publint && attw --pack . --profile node16",
     "prepublishOnly": "npm run build && npm test && npm run check:package"
   },
   "devDependencies": {
+    "@ai-sdk/openai": "4.0.107",
     "@anthropic-ai/sdk": "1.8.0",
     "@arethetypeswrong/cli": "0.18.5",
     "@biomejs/biome": "2.6.8",
+    "@google/genai": "2.32.0",
+    "@mistralai/mistralai": "3.5.0",
     "@types/node": "26.6.6",
+    "ai": "7.0.161",
+    "cohere-ai": "8.3.0",
+    "ollama": "0.6.4",
     "openai": "7.57.0",
     "publint": "0.3.25",
     "tsup": "9.0.0",
@@ -59,7 +112,17 @@
     "openai",
     "anthropic",
     "gemini",
-    "vitest"
+    "mistral",
+    "groq",
+    "deepseek",
+    "ollama",
+    "cohere",
+    "openrouter",
+    "ai-sdk",
+    "vitest",
+    "jest",
+    "resilience",
+    "chaos-testing"
   ],
   "license": "MIT",
   "author": "Adda",

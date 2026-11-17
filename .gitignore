@@ -9,3 +9,5 @@ coverage/
 *.log
 # Cassettes temporaires générées par la suite de tests
 test/.tmp/
+test/e2e/**/__cassettes__/
+test/e2e/**/node_modules/

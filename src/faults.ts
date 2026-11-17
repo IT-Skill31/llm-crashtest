@@ -1,5 +1,6 @@
 import { CassetteConfigError } from "./errors.js";
 import { isPlainObject, type JsonValue } from "./json.js";
+import { type ErrorFormat, errorFormatFor } from "./providers/index.js";
 import { sleep } from "./stream.js";
 
 /** N-ième appel intercepté (à partir de 1), ou filtre. Absent : tous les appels. */
@@ -108,21 +109,6 @@ export function faultsFor(faults: readonly Fault[], call: number, body: JsonValu
   });
 }
 
-type ProviderKind = "anthropic" | "openai" | "gemini" | "mistral";
-
-export function detectProvider(url: URL): ProviderKind {
-  const h = url.hostname;
-  if (h === "api.anthropic.com" || url.pathname.endsWith("/v1/messages")) return "anthropic";
-  if (
-    h.endsWith("generativelanguage.googleapis.com") ||
-    /:(stream)?generateContent$/i.test(url.pathname)
-  ) {
-    return "gemini";
-  }
-  if (h === "api.mistral.ai") return "mistral";
-  return "openai";
-}
-
 const ANTHROPIC_TYPES: Record<number, [string, string]> = {
   400: ["invalid_request_error", "Invalid request"],
   401: ["authentication_error", "invalid x-api-key"],
@@ -144,8 +130,27 @@ const GEMINI_STATUS: Record<number, [string, string]> = {
 };
 
 /** Corps d'erreur au format réel de chaque fournisseur, pour que le SDK lève la bonne exception. */
-export function providerErrorBody(provider: ProviderKind, status: number): JsonValue {
+export function providerErrorBody(provider: ErrorFormat, status: number): JsonValue {
   switch (provider) {
+    case "cohere":
+      return {
+        id: "llm-crashtest-fault",
+        message:
+          status === 429
+            ? "You are using a Trial key, which is limited to 10 API calls / minute."
+            : status >= 500
+              ? "internal server error, this has been reported to our developers"
+              : "invalid request",
+      };
+    case "ollama":
+      return {
+        error:
+          status === 429
+            ? "server busy, please try again. maximum pending requests exceeded"
+            : status >= 500
+              ? "llama runner process has terminated"
+              : "invalid request",
+      };
     case "anthropic": {
       const [type, message] = ANTHROPIC_TYPES[status] ??
         (status >= 500 ? ANTHROPIC_TYPES[500] : ANTHROPIC_TYPES[400]) ?? ["api_error", "Error"];
@@ -180,7 +185,7 @@ export function httpFaultResponse(fault: HttpFault, url: URL): Response {
   };
   if (fault.retryAfter !== undefined) headers["retry-after"] = String(fault.retryAfter);
   if (fault.shouldRetry !== undefined) headers["x-should-retry"] = String(fault.shouldRetry);
-  const body = fault.body ?? providerErrorBody(detectProvider(url), fault.status);
+  const body = fault.body ?? providerErrorBody(errorFormatFor(url), fault.status);
   return new Response(JSON.stringify(body), { status: fault.status, headers });
 }
 
@@ -201,12 +206,19 @@ const MALFORMED_SSE = 'data: {"llm-crashtest": malformed\n\n';
  * des lignes `data:` : le parseur du SDK reçoit un événement connu mais illisible.
  */
 export function corruptSseChunk(chunk: string): string {
+  const half = (s: string) => s.slice(0, Math.max(1, Math.floor(s.length / 2)));
   let touched = false;
-  const out = chunk.replace(/^data: ?(.+)$/gm, (_line, payload: string) => {
+  const sse = chunk.replace(/^data: ?(.+)$/gm, (_line, payload: string) => {
     touched = true;
-    return `data: ${payload.slice(0, Math.max(1, Math.floor(payload.length / 2)))}`;
+    return `data: ${half(payload)}`;
   });
-  return touched ? out : `${chunk}${MALFORMED_SSE}`;
+  if (touched) return sse;
+  // NDJSON (Ollama…) : chaque ligne JSON est tronquée.
+  const ndjson = chunk.replace(/^(\{.*\})$/gm, (_line, json: string) => {
+    touched = true;
+    return half(json);
+  });
+  return touched ? ndjson : `${chunk}${MALFORMED_SSE}`;
 }
 
 /** Applique `stream-cut` et `malformed` au corps d'une réponse rejouée. */

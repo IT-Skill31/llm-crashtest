@@ -11,7 +11,7 @@ import {
 } from "./faults.js";
 import { canonicalize, type JsonValue } from "./json.js";
 import { computeKey, type KeyOptions, normalizeRequest, parseBody, redactUrl } from "./key.js";
-import { DEFAULT_HOSTS, hostMatches } from "./providers/index.js";
+import { DEFAULT_HOSTS, hostMatches, hostsFor } from "./providers/index.js";
 import { type RedactOptions, Redactor } from "./redact.js";
 import {
   CASSETTE_VERSION,
@@ -43,6 +43,11 @@ export interface CassetteOptions extends KeyOptions {
   mode?: Mode;
   /** Domaines interceptés (`api.x.com` ou `*.x.com`). Les autres requêtes passent sans être touchées. */
   hosts?: readonly string[];
+  /**
+   * Fournisseurs interceptés, par nom (ex. `["openai", "ollama"]`), à la place de `hosts`.
+   * Par défaut : tous les fournisseurs cloud connus (Ollama, local, est opt-in).
+   */
+  providers?: readonly string[];
   redact?: RedactOptions;
   /** Pannes injectées, appliquées sans réseau. Voir `setFaults` pour les changer en cours de test. */
   faults?: readonly Fault[];
@@ -67,8 +72,24 @@ export interface CassetteFetch {
   readonly calls: number;
   /** Remplace les pannes injectées et remet le compteur d'appels à zéro. */
   setFaults(faults?: readonly Fault[]): void;
-  /** Attend la fin des écritures de cassette en cours. */
+  /** Interactions utilisées et rejeux manqués : base des commandes `prune` et `stale`. */
+  usage(): CassetteUsage;
+  /**
+   * Attend la fin des écritures de cassette, y compris des flux encore en cours d'enregistrement.
+   * Rejette si un enregistrement en arrière-plan a échoué (ex. secret détecté).
+   */
   flush(): Promise<void>;
+}
+
+export interface CassetteUsage {
+  cassettePath: string;
+  /** Clés des interactions rejouées ou enregistrées. */
+  usedKeys: string[];
+  /** Clés présentes dans la cassette (`null` si elle n'a jamais été chargée). */
+  knownKeys: string[] | null;
+  /** Requêtes sans interaction correspondante en mode `replay`. */
+  misses: number;
+  calls: number;
 }
 
 const DEFAULT_MAX_BODY = 10 * 1024 * 1024;
@@ -144,7 +165,12 @@ export function cassetteFetch(options: CassetteOptions): CassetteFetch {
   }
   const mode = resolveMode(options.mode);
   const file = resolveCassettePath(options.dir, options.name ?? "default");
-  const hosts = options.hosts ?? DEFAULT_HOSTS;
+  let hosts: readonly string[];
+  try {
+    hosts = options.hosts ?? (options.providers ? hostsFor(options.providers) : DEFAULT_HOSTS);
+  } catch (err) {
+    throw new CassetteConfigError((err as Error).message);
+  }
   const baseFetch = options.fetch ?? globalThis.fetch;
   if (typeof baseFetch !== "function") throw new CassetteConfigError("Aucun `fetch` disponible.");
   const maxBody = options.maxBodyBytes ?? DEFAULT_MAX_BODY;
@@ -169,13 +195,32 @@ export function cassetteFetch(options: CassetteOptions): CassetteFetch {
     return cassette;
   };
   const used = new Map<string, number>();
+  const usedKeys = new Set<string>();
+  let misses = 0;
+  let loaded: Cassette | undefined;
+  // Écritures sérialisées : une écriture en échec ne bloque pas les suivantes.
   let writes: Promise<void> = Promise.resolve();
+  // Enregistrements de flux encore en cours (le SDK peut avoir arrêté de lire avant la fin).
+  const pending = new Set<Promise<void>>();
+  let backgroundError: unknown;
 
   const persist = async (data: Cassette, interaction: Interaction) => {
+    usedKeys.add(interaction.key);
     data.interactions.push(interaction);
     const snapshot: Cassette = { version: CASSETTE_VERSION, interactions: [...data.interactions] };
-    writes = writes.then(() => saveCassette(file, snapshot));
+    const write = writes.catch(() => {}).then(() => saveCassette(file, snapshot));
+    writes = write;
+    await write;
+  };
+
+  const flush = async () => {
+    await Promise.allSettled([...pending]);
     await writes;
+    if (backgroundError !== undefined) {
+      const err = backgroundError;
+      backgroundError = undefined;
+      throw err;
+    }
   };
 
   const f = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -201,12 +246,14 @@ export function cassetteFetch(options: CassetteOptions): CassetteFetch {
 
     const key = computeKey(normalized);
     const data = await loadOnce();
+    loaded = data;
 
     // Les appels identiques sont rejoués dans l'ordre d'enregistrement.
     const index = used.get(key) ?? 0;
     const match = data.interactions.filter((it) => it.key === key)[index];
     if (match) {
       used.set(key, index + 1);
+      usedKeys.add(key);
       const res = replayResponse(match, timing, request.signal);
       return applyBodyFaults(res, active, match.response.bodyEncoding === "stream");
     }
@@ -216,6 +263,7 @@ export function cassetteFetch(options: CassetteOptions): CassetteFetch {
       Redactor.secretsFromHeaders(request.headers, options.redact?.headers),
     );
     if (mode === "replay") {
+      misses++;
       throw describeMiss(normalized, data.interactions, keyOptions, file, redactor);
     }
     used.set(key, index + 1);
@@ -264,10 +312,20 @@ export function cassetteFetch(options: CassetteOptions): CassetteFetch {
 
     if (streaming && !bodyFaulted) {
       // Le SDK reçoit le flux en direct ; la cassette est écrite quand le flux se termine.
-      const body = recordingStream(response.body as ReadableStream<Uint8Array>, maxBody, (chunks) =>
-        persist(data, build(null, chunks)),
+      const { stream, done } = recordingStream(
+        response.body as ReadableStream<Uint8Array>,
+        maxBody,
+        (chunks) => persist(data, build(null, chunks)),
       );
-      return new Response(body, {
+      pending.add(done);
+      done.then(
+        () => pending.delete(done),
+        (err: unknown) => {
+          pending.delete(done);
+          backgroundError ??= err;
+        },
+      );
+      return new Response(stream, {
         status: response.status,
         statusText: response.statusText,
         headers: freshHeaders(response.headers),
@@ -314,6 +372,15 @@ export function cassetteFetch(options: CassetteOptions): CassetteFetch {
         calls = 0;
       },
     },
-    flush: { value: () => writes },
+    flush: { value: flush },
+    usage: {
+      value: (): CassetteUsage => ({
+        cassettePath: file,
+        usedKeys: [...usedKeys],
+        knownKeys: loaded ? [...new Set(loaded.interactions.map((it) => it.key))] : null,
+        misses,
+        calls,
+      }),
+    },
   }) as CassetteFetch;
 }

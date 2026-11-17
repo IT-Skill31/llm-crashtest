@@ -4,8 +4,11 @@ import type { StreamChunk } from "./store.js";
 
 export type ReplayTiming = "instant" | "original";
 
+/** Flux enregistrés chunk par chunk : SSE (OpenAI, Anthropic, Gemini…) et NDJSON (Ollama, Cohere v1). */
 export function isEventStream(headers: Headers): boolean {
-  return /^text\/event-stream\b/i.test(headers.get("content-type") ?? "");
+  return /^(text\/event-stream|application\/(x-)?ndjson|application\/jsonl|application\/stream\+json)\b/i.test(
+    headers.get("content-type") ?? "",
+  );
 }
 
 function tooBig(limit: number): CassetteError {
@@ -39,27 +42,33 @@ class ChunkRecorder {
 }
 
 /**
- * Flux transmis au SDK pendant l'enregistrement : chaque chunk est relayé tel quel et noté.
- * À la fin, `onComplete` écrit la cassette ; s'il échoue (secret détecté…), le flux se termine
- * en erreur côté SDK et rien n'est écrit (échec en mode sûr, OWASP A10).
+ * Enregistrement d'un flux pendant que le SDK le reçoit en direct.
+ *
+ * Le corps est dupliqué (`tee`) : une branche part vers le SDK, l'autre est lue jusqu'au bout
+ * par l'enregistreur, même si le SDK s'arrête avant la fin (Ollama s'arrête sur `done: true`).
+ * Si l'écriture échoue (secret détecté, flux trop gros), le SDK reçoit l'erreur en fin de flux
+ * et rien n'est écrit (échec en mode sûr, OWASP A10). `done` permet d'attendre l'écriture.
  */
 export function recordingStream(
   body: ReadableStream<Uint8Array>,
   limit: number,
   onComplete: (chunks: StreamChunk[]) => Promise<void>,
-): ReadableStream<Uint8Array> {
-  const recorder = new ChunkRecorder(limit);
-  return body.pipeThrough(
+): { stream: ReadableStream<Uint8Array>; done: Promise<void> } {
+  const [forSdk, forRecorder] = body.tee();
+  const done = captureStream(forRecorder, limit).then(onComplete);
+  // Évite un rejet non géré si le SDK a abandonné le flux : l'erreur reste dans `done`.
+  done.catch(() => {});
+  const stream = forSdk.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, controller) {
-        recorder.push(chunk);
         controller.enqueue(chunk);
       },
       async flush() {
-        await onComplete(recorder.end());
+        await done;
       },
     }),
   );
+  return { stream, done };
 }
 
 /** Lit un flux en entier en conservant le découpage et le timing. */

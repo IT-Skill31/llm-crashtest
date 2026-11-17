@@ -34,8 +34,11 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run lint
-      - run: npm run typecheck
+      # Après le build : les exemples et l'e2e importent dist/, comme le ferait un utilisateur.
       - run: npm run build
+      - run: npm run typecheck
       - run: npm test
+      - run: npm run test:e2e
+      - run: npm run examples
       - run: npm run check:package
       - run: npm audit --omit=dev --audit-level=moderate

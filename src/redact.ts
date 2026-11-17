@@ -23,6 +23,7 @@ export const AUTH_HEADERS: readonly string[] = [
   "x-api-key",
   "api-key",
   "x-goog-api-key",
+  "ocp-apim-subscription-key",
   "cookie",
 ];
 
@@ -42,8 +43,18 @@ const SAFE_RESPONSE_HEADERS: readonly RegExp[] = [
 /** Détecteurs de secrets connus. Une correspondance après masquage bloque l'écriture. */
 const DETECTORS: readonly { name: string; re: RegExp }[] = [
   { name: "clé API Anthropic", re: /sk-ant-[A-Za-z0-9_-]{20,}/ },
-  { name: "clé API OpenAI", re: /\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}/ },
+  // OpenAI, DeepSeek, OpenRouter (sk-or-v1-…) partagent le préfixe sk-.
+  {
+    name: "clé API sk- (OpenAI, DeepSeek, OpenRouter…)",
+    re: /\bsk-(?:proj-|svcacct-|admin-|or-v1-)?[A-Za-z0-9_-]{20,}/,
+  },
   { name: "clé API Google", re: /\bAIza[0-9A-Za-z_-]{35}/ },
+  { name: "jeton OAuth Google (Vertex AI)", re: /\bya29\.[0-9A-Za-z_-]{20,}/ },
+  { name: "clé API Groq", re: /\bgsk_[A-Za-z0-9]{40,}/ },
+  { name: "clé API xAI", re: /\bxai-[A-Za-z0-9]{40,}/ },
+  { name: "clé API Perplexity", re: /\bpplx-[A-Za-z0-9]{40,}/ },
+  { name: "jeton Hugging Face", re: /\bhf_[A-Za-z0-9]{30,}/ },
+  { name: "clé API Fireworks", re: /\bfw_[A-Za-z0-9]{20,}/ },
   { name: "jeton GitHub", re: /\bgh[pousr]_[A-Za-z0-9]{36,}/ },
   { name: "clé d'accès AWS", re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ },
   { name: "jeton Bearer", re: /\bBearer\s+[A-Za-z0-9._~+/-]{20,}/i },

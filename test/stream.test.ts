@@ -56,9 +56,10 @@ describe("streaming SSE", () => {
   it("OpenAI : enregistre puis rejoue hors ligne", async () => {
     const dir = await tempDir();
     const opts: CassetteOptions = { dir, name: "o-stream" };
-    expect(
-      await openaiStream(cassetteFetch({ ...opts, mode: "auto", fetch: fakeLLMFetch() })),
-    ).toBe(FULL);
+    const recorder = cassetteFetch({ ...opts, mode: "auto", fetch: fakeLLMFetch() });
+    expect(await openaiStream(recorder)).toBe(FULL);
+    // Le SDK s'arrête sur [DONE] : l'enregistrement se termine en arrière-plan.
+    await recorder.flush();
     const replay = cassetteFetch({ ...opts, mode: "replay", fetch: offlineFetch });
     expect(await openaiStream(replay)).toBe(FULL);
   });
@@ -66,9 +67,9 @@ describe("streaming SSE", () => {
   it("rejoue au timing d'origine si demandé", async () => {
     const dir = await tempDir();
     const opts: CassetteOptions = { dir, name: "timing" };
-    await openaiStream(
-      cassetteFetch({ ...opts, mode: "auto", fetch: fakeLLMFetch({ delayMs: 40 }) }),
-    );
+    const recorder = cassetteFetch({ ...opts, mode: "auto", fetch: fakeLLMFetch({ delayMs: 40 }) });
+    await openaiStream(recorder);
+    await recorder.flush();
 
     let t = performance.now();
     await openaiStream(cassetteFetch({ ...opts, mode: "replay", fetch: offlineFetch }));
